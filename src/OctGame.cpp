@@ -1,7 +1,8 @@
-#include "OctGame.hpp"
+﻿#include "OctGame.hpp"
 #include <stdarg.h>
 
 #define KEYARRAY_SIZE 256
+#define DEFAULT_FONT_SIZE 30
 
 using namespace std;
 
@@ -78,7 +79,7 @@ OCT_EXPORTS void OctGame::Init(int* argc, char** argv, int width, int height) {
     ReleaseDC(GetDesktopWindow(), tmpDC);
 
     this->mHFont = CreateFont(
-        30, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_FONT_SIZE, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         SHIFTJIS_CHARSET, OUT_DEFAULT_PRECIS,
         CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
         VARIABLE_PITCH | FF_ROMAN, NULL
@@ -184,41 +185,110 @@ OCT_EXPORTS void OctGame::DrawBox(int x1, int y1, int x2, int y2, int color, boo
     }
 }
 
-OCT_EXPORTS void OctGame::DrawImage(GHandle handle, int dx, int dy, bool transpose, bool isReverse){
-    cv::Mat* img = this->mImgList.GetImage(handle);
-    uchar* data = img->data;
+OCT_EXPORTS void OctGame::DrawImage(GHandle handle, int x, int y, bool transpose, bool isReverseX, bool isReverseY){
+    cv::Mat* pImage = this->mImgList.GetImage(handle);
+    uchar* data = pImage->data;
 
-    if(img == nullptr) {
+    if(pImage == nullptr) {
         return;
     }
 
-    int imgC = img->channels();
-    int imgW = img->cols;
-    int imgH = img->rows;
+    int imageChannel = pImage->channels();
+    int imageWidth = pImage->cols;
+    int imageHeight = pImage->rows;
     float tp = 1.0f;
 
-    if(imgC <= 3) transpose = false;
+    if(imageChannel <= 3) {
+        transpose = false;
+    }
 
-    for(int y = 0; y < imgH && y + dy < this->mHeight; y++){
-        for(int x = 0; x < imgW && x + dx < this->mWidth; x++) {
-            if(x + dx < 0 || y + dy < 0) continue;
+    for(int _y = 0; _y < imageHeight && _y + y < this->mHeight; _y++){
+        for(int _x = 0; _x < imageWidth && _x + x < this->mWidth; _x++) {
+            if(_x + x < 0 || _y + y < 0) continue;
 
-            int ix = x;
-            int iy = y;
+            int xi = _x;
+            int yi = _y;
 
-            if(isReverse) {
-                ix = imgW - x - 1;
+            if(isReverseX) {
+                xi = imageWidth - xi - 1;
+            }
+
+            if(isReverseY) {
+                yi = imageHeight - yi - 1;
             }
 
             if(transpose) {
-                tp = img->data[(iy * imgW + ix) * imgC + 3] / 255.0f;
+                tp = pImage->data[(yi * imageWidth + xi) * imageChannel + 3] / 255.0f;
                 if(tp == 0) continue;
             }
 
             for(int c = 0; c < 3; c++){
-                int dtIdx = ((this->mHeight - (y + dy) - 1) * this->mWidth + (x + dx)) * 3 + c;
-                int scIdx = (iy * imgW + ix) * imgC + c;
-                this->mScreen[dtIdx] = this->mScreen[dtIdx] * (1 - tp) + img->data[scIdx] * tp;
+                int dtIdx = ((this->mHeight - (_y + y) - 1) * this->mWidth + (_x + x)) * 3 + c;
+                int scIdx = (yi * imageWidth + xi) * imageChannel + c;
+                this->mScreen[dtIdx] = this->mScreen[dtIdx] * (1 - tp) + pImage->data[scIdx] * tp;
+            }
+        }
+    }
+}
+
+OCT_EXPORTS void OctGame::DrawResizedImage(GHandle handle, int x1, int y1, int x2, int y2, bool transpose){
+    cv::Mat* pImage = this->mImgList.GetImage(handle);
+
+    if(pImage == nullptr) {
+        return;
+    }
+
+    uchar* data = pImage->data;
+    int imageChannel = pImage->channels();
+    int imageWidth = pImage->cols;
+    int imageHeight = pImage->rows;
+
+    bool isReverseX = x1 > x2;
+    bool isReverseY = y1 > y2;
+    if(isReverseX) {
+        int tmp = x1;
+        x1 = x2;
+        x2 = tmp;
+    }
+    if(isReverseY) {
+        int tmp = y1;
+        y1 = y2;
+        y2 = tmp;
+    }
+
+    int dstAreaWidth = x2 - x1 + 1;
+    int dstAreaHeight = y2 - y1 + 1;
+    float ratioWidth = imageWidth / (float)dstAreaWidth;
+    float ratioHeight = imageHeight / (float)dstAreaHeight;
+    float tp = 1.0f;
+
+    if(imageChannel <= 3) {
+        transpose = false;
+    }
+
+    for(int _y = 0; _y < dstAreaHeight && _y + y1 < this->mHeight; _y++){
+        for(int _x = 0; _x < dstAreaWidth && _x + x1 < this->mWidth; _x++) {
+            if(_x + x1 < 0 || _y + 1 < 0) continue;
+
+            int xi = ratioWidth * _x;
+            int yi = ratioHeight * _y;
+
+            if(isReverseX) {
+                xi = imageWidth - xi - 1;
+            }
+            if(isReverseY) {
+                yi = imageHeight - yi - 1;
+            }
+
+            if(transpose) {
+                tp = data[(yi * imageWidth + xi) * imageChannel + 3] / 255.0f;
+                if(tp == 0) continue;
+            }
+
+            for(int c = 0; c < 3; c++){
+                int dstIdx = ((this->mHeight - (_y + y1) - 1) * this->mWidth + (_x + x1)) * 3 + c;
+                int srcIdx = (yi * imageWidth + xi) * imageChannel + c;
+                this->mScreen[dstIdx] = this->mScreen[dstIdx] * (1 - tp) + data[srcIdx] * tp;
             }
         }
     }
@@ -231,11 +301,15 @@ OCT_EXPORTS void OctGame::DrawText(int x, int y, COLORREF color, const char* for
     vsprintf_s(buf, 256, format, ap);
     va_end(ap);
 
+    this->DrawText(x, y, color, DEFAULT_FONT_SIZE, buf);
+
+    /*
     if(this->mTextColor != color) {
         this->mTextColor = color;
         SetTextColor(this->mHDC, this->mTextColor);
     }
     TextOut(this->mHDC, x, y, buf, lstrlen(buf));
+    */
 }
 
 OCT_EXPORTS void OctGame::DrawText(int x, int y, COLORREF color, int size, const char* format, ...) {
@@ -243,7 +317,7 @@ OCT_EXPORTS void OctGame::DrawText(int x, int y, COLORREF color, int size, const
         size, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         SHIFTJIS_CHARSET, OUT_DEFAULT_PRECIS,
         CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
-        VARIABLE_PITCH | FF_ROMAN, NULL
+        VARIABLE_PITCH | FF_DONTCARE, TEXT("HGP行書体")
     );
 
     HFONT font = static_cast<HFONT>(SelectObject(this->mHDC, this->mHFont));
