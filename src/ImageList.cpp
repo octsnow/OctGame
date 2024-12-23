@@ -4,9 +4,6 @@ using namespace std;
 
 namespace {
     cv::Mat ReadImage(string filepath, bool isBmp) {
-#ifdef OCT_DEBUG
-        cout << "start reading " << filepath << endl;
-#endif
         cv::Mat img;
 
         img = cv::imread(filepath, cv::IMREAD_UNCHANGED);
@@ -33,9 +30,6 @@ namespace {
             }
             img = newImg;
         }
-#ifdef OCT_DEBUG
-        cout << "end reading " << filepath << endl;
-#endif
 
         return img;
     }
