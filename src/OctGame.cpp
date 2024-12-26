@@ -30,14 +30,26 @@ namespace {
         }
     }
 
-    int Clamp(int n, int min, int max) {
+    inline int Clamp(int n, int min, int max) {
         if(n < min) return min;
         if(n > max) return max;
         return n;
     }
 
-    inline void DrawPixel(uint8_t* pDst, uint8_t src, float alpha) {
-        *pDst = src * alpha + *pDst * (1.0 - alpha);
+    inline void DrawPixel(uint8_t* pDst, int width, int height, int x, int y, int color, float alpha) {
+        for(int c = 0; c < 3; c++) {
+            uint8_t src = (uint8_t)((color >> ((2 - c) * 8)) & 0xFF);
+            uint8_t *pixel = &pDst[((height - y - 1) * width + x) * 3 + c];
+            *pixel = src * alpha + *pixel * (1.0 - alpha);
+        }
+        //*pDst = src * alpha + *pDst * (1.0 - alpha);
+    }
+
+    inline void DrawPixelIfOnScreen(uint8_t* pDst, int width, int height, int x, int y, int color, float alpha) {
+        if(x < 0 || x >= width || y < 0 || y >= height) {
+            return;
+        }
+        DrawPixel(pDst, width, height, x, y, color, alpha);
     }
 }
 
@@ -146,40 +158,253 @@ OCT_EXPORTS int OctGame::LoadRegionImageFile(string filepath, float sx, float sy
     return this->mImgList.LoadRegionImageFile(filepath, sx, sy, width, height, n, isBmp);
 }
 
+OCT_EXPORTS void OctGame::DrawLine(int x1, int y1, int x2, int y2, int color, float alpha) {
+    float slope = 0;
+    if(x1 != x2) {
+        slope = (float)(y2 - y1) / (x2 - x1);
+        if(x1 > x2) {
+            int tmp = x1;
+            x1 = x2;
+            x2 = tmp;
+            tmp = y1;
+            y1 = y2;
+            y2 = tmp;
+        }
+    } else if(y1 < 0 || y2 >= this->mHeight) {
+        return;
+    }
+
+    if(x2 < 0 || x1 >= this->mWidth) {
+        return;
+    }
+    if(x1 < 0) {
+        y1 += slope * (-x1);
+        x1 = 0;
+    }
+    if(x2 >= this->mWidth) {
+        y2 -= slope * (x2 - this->mWidth - 1);
+        x2 = this->mWidth - 1;
+    }
+
+    slope = 0;
+    if(y1 != y2) {
+        slope = (float)(x2 - x1) / (y2 - y1);
+        if(y1 > y2) {
+            int tmp = x1;
+            x1 = x2;
+            x2 = tmp;
+            tmp = y1;
+            y1 = y2;
+            y2 = tmp;
+        }
+    } else if(x1 < 0 || x2 >= this->mWidth) {
+        return;
+    }
+
+    if(y2 < 0 || y1 >= this->mHeight) {
+        return;
+    }
+    if(y1 < 0) {
+        x1 += slope * (-y1);
+        y1 = 0;
+    }
+    if(y2 >= this->mHeight) {
+        x2 -= slope * (y2 - this->mHeight - 1);
+        y2 = this->mHeight - 1;
+    }
+
+    int dx = abs(x1 - x2);
+    int dy = abs(y1 - y2);
+
+    if(dx > dy) {
+        if(x1 > x2) {
+            int tmp = x1;
+            x1 = x2;
+            x2 = tmp;
+            tmp = y1;
+            y1 = y2;
+            y2 = tmp;
+        }
+        dy = y2 - y1;
+
+        int x = 0;
+        int y = 0;
+        int f = 0;
+        int k = y1 < y2 ? 1 : -1;
+        while(x <= dx) {
+            int _x = x + x1;
+            int _y = y * k + y1;
+            DrawPixel(
+                    this->mScreen,
+                    this->mWidth,
+                    this->mHeight,
+                    _x, _y,
+                    color,
+                    alpha);
+
+            f = f + k * (dy << 1) - dx;
+            if(f < 0) {
+                x++;
+                f += dx;
+            } else {
+                x++;
+                y++;
+                f -= dx;
+            }
+        }
+    } else if(dy > dx) {
+        if(y1 > y2) {
+            int tmp = x1;
+            x1 = x2;
+            x2 = tmp;
+            tmp = y1;
+            y1 = y2;
+            y2 = tmp;
+        }
+        dx = x2 - x1;
+
+        int x = 0;
+        int y = 0;
+        int f = 0;
+        int k = x1 < x2 ? 1 : -1;
+        while(y <= dy) {
+            int _x = x * k + x1;
+            int _y = y + y1;
+            DrawPixel(
+                    this->mScreen,
+                    this->mWidth,
+                    this->mHeight,
+                    _x, _y,
+                    color,
+                    alpha);
+
+            f = f + k * (dx << 1) - dy;
+            if(f < 0) {
+                y++;
+                f += dy;
+            } else {
+                x++;
+                y++;
+                f -= dy;
+            }
+        }
+    }
+}
+
 OCT_EXPORTS void OctGame::DrawBox(int x1, int y1, int x2, int y2, int color, bool fillFlag, float alpha) {
     int minX = x1 < x2 ? x1 : x2;
-    int minY = this->mHeight - (y1 > y2 ? y1 : y2);
+    int minY = y1 < y2 ? y1 : y2;
     int maxX = x1 > x2 ? x1 : x2;
-    int maxY = this->mHeight - (y1 < y2 ? y1 : y2) + 1;
+    int maxY = y1 > y2 ? y1 : y2;
 
-    minX = Clamp(minX, 0, this->mWidth);
-    maxX = Clamp(maxX, 0, this->mWidth);
-    minY = Clamp(minY, 0, this->mHeight);
-    maxY = Clamp(maxY, 0, this->mHeight);
+    if(maxX < 0 || maxY < 0 || minX >= this->mWidth || minY >= this->mHeight) {
+        return;
+    }
+
     if(fillFlag) {
+        minX = Clamp(minX, 0, this->mWidth - 1);
+        maxX = Clamp(maxX, 0, this->mWidth - 1);
+        minY = Clamp(minY, 0, this->mHeight - 1);
+        maxY = Clamp(maxY, 0, this->mHeight - 1);
         for(int y = minY; y < maxY; y++) {
             for(int x = minX; x < maxX; x++) {
-                for(int c = 0; c < 3; c++) {
-                    uint8_t src = (uint8_t)((color >> ((2 - c) * 8)) & 0xFF);
-                    DrawPixel(&this->mScreen[(y * this->mWidth + x) * 3 + c], src, alpha);
-                    //this->mScreen[index] = src * alpha + dst * (1 - alpha);
-                }
+                DrawPixel(this->mScreen, this->mWidth, this->mHeight, x, y, color, alpha);
             }
         }
     } else {
-        for(int x = minX; x < maxX; x++) {
-            for(int c = 0; c < 3; c++) {
-                uint8_t src = (uint8_t)((color >> ((2 - c) * 8)) & 0xFF);
-                DrawPixel(&this->mScreen[(minY * this->mWidth + x) * 3 + c], src, alpha);
-                DrawPixel(&this->mScreen[((maxY - 1) * this->mWidth + x) * 3 + c], src, alpha);
+        int s = minX;
+        int e = maxX;
+        if(minX < 0) {
+            s = 0;
+        }
+        if(maxX >= this->mWidth) {
+            e = this->mWidth - 1;
+        }
+        if(minY < 0) {
+            for(int x = s; x <= e; x++) {
+                DrawPixel(this->mScreen, this->mWidth, this->mHeight, x, maxY, color, alpha);
+            }
+        } else if(maxY >= this->mHeight) {
+            for(int x = s; x <= e; x++) {
+                DrawPixel(this->mScreen, this->mWidth, this->mHeight, x, minY, color, alpha);
+            }
+        } else {
+            for(int x = s; x <= e; x++) {
+                DrawPixel(this->mScreen, this->mWidth, this->mHeight, x, minY, color, alpha);
+                DrawPixel(this->mScreen, this->mWidth, this->mHeight, x, maxY, color, alpha);
             }
         }
 
-        for(int y = minY; y < maxY; y++) {
-            for(int c = 0; c < 3; c++) {
-                uint8_t src = (uint8_t)((color >> ((2 - c) * 8)) & 0xFF);
-                DrawPixel(&this->mScreen[(y * this->mWidth + minX) * 3 + c], src, alpha);
-                DrawPixel(&this->mScreen[(y * this->mWidth + (maxX - 1)) * 3 + c], src, alpha);
+        s = minY;
+        e = maxY;
+        if(minY < 0) {
+            s = 0;
+        }
+        if(maxY >= this->mHeight) {
+            e = this->mHeight - 1;
+        }
+        if(minX < 0) {
+            for(int y = s; y <= e; y++) {
+                DrawPixel(this->mScreen, this->mWidth, this->mHeight, maxX, y, color, alpha);
+            }
+        } else if(maxX >= this->mWidth) {
+            for(int y = s; y <= e; y++) {
+                DrawPixel(this->mScreen, this->mWidth, this->mHeight, minX, y, color, alpha);
+            }
+        } else {
+            for(int y = s; y <= e; y++) {
+                DrawPixel(this->mScreen, this->mWidth, this->mHeight, minX, y, color, alpha);
+                DrawPixel(this->mScreen, this->mWidth, this->mHeight, maxX, y, color, alpha);
+            }
+        }
+    }
+}
+
+OCT_EXPORTS void OctGame::DrawCircle(int x0, int y0, int r, int color, bool fillFlag, float alpha) {
+    int x = r;
+    int y = 0;
+    int f = 0;
+
+    if(fillFlag) {
+        while(y <= x) {
+            for(int i = 0; i <= x; i++) {
+                DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 + i, y0 + y, color, alpha);
+                DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 + i, y0 - y, color, alpha);
+                DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 - i, y0 + y, color, alpha);
+                DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 - i, y0 - y, color, alpha);
+                DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 + y, y0 + i, color, alpha);
+                DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 + y, y0 - i, color, alpha);
+                DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 - y, y0 + i, color, alpha);
+                DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 - y, y0 - i, color, alpha);
+            }
+            f = f + 5 - (x << 2) + (y << 3);
+            if(f < 0) {
+                y++;
+                f = f - 1 + (x << 2);
+            } else {
+                x--;
+                y++;
+                f = f + 3 - (x << 2);
+            }
+        }
+    } else {
+        while(y <= x) {
+            DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 + x, y0 + y, color, alpha);
+            DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 + x, y0 - y, color, alpha);
+            DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 - x, y0 + y, color, alpha);
+            DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 - x, y0 - y, color, alpha);
+            DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 + y, y0 + x, color, alpha);
+            DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 + y, y0 - x, color, alpha);
+            DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 - y, y0 + x, color, alpha);
+            DrawPixelIfOnScreen(this->mScreen, this->mWidth, this->mHeight, x0 - y, y0 - x, color, alpha);
+            f = f + 5 - (x << 2) + (y << 3);
+            if(f < 0) {
+                y++;
+                f = f - 1 + (x << 2);
+            } else {
+                x--;
+                y++;
+                f = f + 3 - (x << 2);
             }
         }
     }
